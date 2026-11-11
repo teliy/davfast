@@ -22,7 +22,22 @@ davfast serve --backend mailru --listen 127.0.0.1:8080  # WebDAV bridge for davf
 
 Local benchmark (in-memory server, no network): 1000 files in 0.06 s (the pipeline does not serialize). On a real network everything is RTT-bound: at 50 ms a single-threaded client does ~20 files/s, davfast with `-c 32` — hundreds of files/s. A repeated `sync` of an unchanged 320-file tree takes 0.013 s.
 
-## Install
+## One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/teliy/davfast/main/install.sh | bash
+```
+
+The installer checks the system for you (network, git, curl, C compiler, Rust, disk space), installs whatever is missing, builds davfast and shows a menu:
+
+1. **Install / update** — build from source, binary into `/usr/local/bin` or `~/.local/bin` (item 2 is the same with manual path selection).
+2. **Set up cloud mounting** — asks for the backend (with explanations: `webdav` is a proxy to any WebDAV server, `mailru` talks to the cloud.mail.ru web API directly), the URL, your login and token (the id.mail.ru "app password", hidden input), and the mount point. It then stores the credentials in `~/.config/davfast/davfast.env` (mode 600), creates a systemd service for the bridge with autostart, configures davfs2 (`use_locks 0`, secrets, an fstab line) and tries to mount the cloud right away.
+3. **System checks only** — a dependency report, changes nothing.
+4. **Uninstall davfast**.
+
+The interface language is picked automatically (English/Russian). Non-interactive mode for CI: `curl -fsSL https://raw.githubusercontent.com/teliy/davfast/main/install.sh | bash -s -- --yes`. Re-running the one-liner updates the repository and rebuilds the binary. To configure mounting without reinstalling: `install.sh --setup-mount`.
+
+## Manual install
 
 Requires Rust 1.75+ (Debian/Ubuntu: `apt install rustc cargo` or [rustup](https://rustup.rs)).
 

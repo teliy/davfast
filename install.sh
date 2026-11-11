@@ -6,6 +6,9 @@
 #  One-line install (RU/EN auto):
 #      curl -fsSL https://raw.githubusercontent.com/teliy/davfast/main/install.sh | bash
 #
+#  The one-liner also offers an interactive mount setup: backend, WebDAV URL,
+#  login + token (hidden input), mount point, systemd service and davfs2.
+#
 #  Non-interactive / CI:
 #      curl -fsSL https://raw.githubusercontent.com/teliy/davfast/main/install.sh | bash -s -- --yes
 #
@@ -21,6 +24,7 @@ BIN_DIR=""                        # "" = auto-resolved later
 ASSUME_YES=0
 CHECK_ONLY=0
 UNINSTALL=0
+SETUP_MOUNT=0
 SKIP_DEPS=0
 CHOOSE_DIRS=0
 FORCE_LANG=""
@@ -116,13 +120,50 @@ t() {  # t <key> [args...] -> translated, formatted message (adds trailing \n)
       path_added)        fmt="Добавлено в %s. Откройте новый терминал или: source %s" ;;
       path_hint)         fmt="Добавьте в ~/.bashrc вручную:  export PATH=\"%s:\$PATH\"" ;;
       menu_title)        fmt="Что делаем?" ;;
-      menu_install)      fmt="  1) Установить / обновить davfast (сборка из исходников)" ;;
-      menu_dirs)         fmt="  2) Установить с выбором каталогов (bin, src)" ;;
-      menu_check)        fmt="  3) Только проверить систему" ;;
-      menu_uninstall)    fmt="  4) Удалить davfast" ;;
+      menu_install)      fmt="  1) Установить / обновить davfast — сборка из исходников, бинарник в PATH" ;;
+      menu_dirs)         fmt="  2) Установить с выбором каталогов — свои пути для бинарника и исходников" ;;
+      menu_setup)        fmt="  3) Настроить монтирование облака — бэкенд, логин/токен, точка монтирования, davfs2, автозапуск" ;;
+      menu_check)        fmt="  4) Только проверить систему — отчёт о зависимостях, ничего не меняет" ;;
+      menu_uninstall)    fmt="  5) Удалить davfast — бинарник и (опционально) исходники" ;;
       menu_exit)         fmt="  0) Выход" ;;
       menu_prompt)       fmt="Выбор [%s]: " ;;
       menu_bad)          fmt="Нет такого пункта меню." ;;
+      setup_offer)       fmt="Настроить монтирование облака сейчас (бэкенд, логин, токен, точка монтирования)?" ;;
+      setup_title)       fmt="Настройка монтирования облака" ;;
+      setup_backend_head) fmt="Какой бэкенд использовать для моста?" ;;
+      setup_b_webdav)    fmt="  1) webdav — мост-прокси к любому WebDAV-серверу (рекомендуется; для облака — webdav.cloud.mail.ru)" ;;
+      setup_b_webdav_d)  fmt="     нужен логин и «пароль для внешних приложений» (id.mail.ru → Безопасность → Пароли для внешних приложений)" ;;
+      setup_b_mailru)    fmt="  2) mailru — прямая работа с веб-API cloud.mail.ru (быстрее на тысячах мелких файлов)" ;;
+      setup_b_mailru_d)  fmt="     экспериментальный путь (по открытой документации); нужен «пароль для внешних приложений»" ;;
+      setup_b_skip)      fmt="  0) Пропустить настройку" ;;
+      setup_url_q)       fmt="URL WebDAV-сервера [%s]: " ;;
+      setup_login_q)     fmt="Логин (полный e-mail)" ;;
+      setup_token_q)     fmt="Токен / «пароль для внешних приложений» (ввод скрыт): " ;;
+      setup_token_empty) fmt="Логин или токен пусты — настройка монтирования прервана." ;;
+      setup_url_bad)     fmt="URL должен начинаться с http:// или https://" ;;
+      setup_mp_q)        fmt="Точка монтирования [%s]: " ;;
+      setup_mp_created)  fmt="Каталог %s готов." ;;
+      setup_mp_fail)     fmt="Не удалось создать %s — создайте вручную: sudo mkdir -p %s" ;;
+      setup_env_written) fmt="Учётные данные сохранены в %s (права 600; файл хранит токен в открытом виде)." ;;
+      setup_unit_written) fmt="Создан сервис моста: %s" ;;
+      setup_unit_ok)     fmt="Мост запущен и добавлен в автозапуск (systemctl --user status davfast-serve)." ;;
+      setup_unit_fail)   fmt="systemd user-сессия недоступна — мост запущен в фоне (лог: %s)." ;;
+      setup_port_timeout) fmt="Мост не поднялся на %s за 10 с — проверьте лог ~/.local/state/davfast-serve.log" ;;
+      setup_serve_cmd)   fmt="Запуск моста вручную: %s" ;;
+      setup_davfs_missing) fmt="davfs2 не установлен (нужен для монтирования)." ;;
+      setup_davfs_offer) fmt="Установить davfs2 через %s?" ;;
+      setup_davfs_hint)  fmt="Поставьте davfs2 вручную (%s install davfs2) и повторите пункт 3 меню." ;;
+      setup_davfs_conf)  fmt="davfs2 настроен: %s (use_locks 0) и %s (учётка для монтирования, 600)." ;;
+      setup_fstab_ok)    fmt="Добавлена строка в /etc/fstab (бэкап: %s). Монтировать: mount %s" ;;
+      setup_fstab_line)  fmt="Добавьте в /etc/fstab строку (от root):" ;;
+      setup_mount_try)   fmt="Пробую смонтировать %s…" ;;
+      setup_mount_ok)    fmt="Смонтировано! Файлы облака доступны в %s" ;;
+      setup_mount_fail)  fmt="Автомонтирование не удалось — выполните команды из блоков выше вручную." ;;
+      setup_done)        fmt="Настройка монтирования завершена." ;;
+      setup_skip)        fmt="Настройка пропущена. Вернуться: однострочник ещё раз → пункт 3 (или install.sh --setup-mount)." ;;
+      setup_need_bin)    fmt="Бинарник davfast не найден — сначала установите его (пункт 1 меню)." ;;
+      setup_next_head)   fmt="Полезные команды:" ;;
+      sum_setup_hint)    fmt="Монтирование можно настроить позже: запустите однострочник ещё раз и выберите пункт «Настроить монтирование» (или install.sh --setup-mount)." ;;
       uninst_found)      fmt="Найден: %s" ;;
       uninst_confirm)    fmt="Удалить перечисленное?" ;;
       uninst_removed)    fmt="Удалено: %s" ;;
@@ -201,13 +242,50 @@ t() {  # t <key> [args...] -> translated, formatted message (adds trailing \n)
       path_added)        fmt="Added to %s. Open a new terminal or run: source %s" ;;
       path_hint)         fmt="Add this to ~/.bashrc manually:  export PATH=\"%s:\$PATH\"" ;;
       menu_title)        fmt="What do you want to do?" ;;
-      menu_install)      fmt="  1) Install / update davfast (build from source)" ;;
-      menu_dirs)         fmt="  2) Install with custom directories (bin, src)" ;;
-      menu_check)        fmt="  3) System checks only" ;;
-      menu_uninstall)    fmt="  4) Uninstall davfast" ;;
+      menu_install)      fmt="  1) Install / update davfast — build from source, binary on PATH" ;;
+      menu_dirs)         fmt="  2) Install with custom directories — pick paths for the binary and sources" ;;
+      menu_setup)        fmt="  3) Set up cloud mounting — backend, login/token, mount point, davfs2, autostart" ;;
+      menu_check)        fmt="  4) System checks only — dependency report, changes nothing" ;;
+      menu_uninstall)    fmt="  5) Uninstall davfast — binary and (optionally) sources" ;;
       menu_exit)         fmt="  0) Exit" ;;
       menu_prompt)       fmt="Choice [%s]: " ;;
       menu_bad)          fmt="Unknown menu item." ;;
+      setup_offer)       fmt="Set up cloud mounting now (backend, login, token, mount point)?" ;;
+      setup_title)       fmt="Cloud mount setup" ;;
+      setup_backend_head) fmt="Which backend should the bridge use?" ;;
+      setup_b_webdav)    fmt="  1) webdav — proxy bridge to any WebDAV server (recommended; for the cloud use webdav.cloud.mail.ru)" ;;
+      setup_b_webdav_d)  fmt="     needs a login and an app password (id.mail.ru → Security → App passwords)" ;;
+      setup_b_mailru)    fmt="  2) mailru — direct cloud.mail.ru web API (faster for thousands of small files)" ;;
+      setup_b_mailru_d)  fmt="     experimental path (based on public docs); needs an app password" ;;
+      setup_b_skip)      fmt="  0) Skip setup" ;;
+      setup_url_q)       fmt="WebDAV server URL [%s]: " ;;
+      setup_login_q)     fmt="Login (full e-mail)" ;;
+      setup_token_q)     fmt="Token / app password (hidden input): " ;;
+      setup_token_empty) fmt="Login or token is empty — mount setup aborted." ;;
+      setup_url_bad)     fmt="URL must start with http:// or https://" ;;
+      setup_mp_q)        fmt="Mount point [%s]: " ;;
+      setup_mp_created)  fmt="Directory %s is ready." ;;
+      setup_mp_fail)     fmt="Could not create %s — create it manually: sudo mkdir -p %s" ;;
+      setup_env_written) fmt="Credentials saved to %s (mode 600; the file stores the token in plain text)." ;;
+      setup_unit_written) fmt="Bridge service created: %s" ;;
+      setup_unit_ok)     fmt="Bridge started and enabled (systemctl --user status davfast-serve)." ;;
+      setup_unit_fail)   fmt="No systemd user session — bridge started in the background (log: %s)." ;;
+      setup_port_timeout) fmt="Bridge did not come up on %s within 10 s — check ~/.local/state/davfast-serve.log" ;;
+      setup_serve_cmd)   fmt="Run the bridge manually: %s" ;;
+      setup_davfs_missing) fmt="davfs2 is not installed (required for mounting)." ;;
+      setup_davfs_offer) fmt="Install davfs2 via %s?" ;;
+      setup_davfs_hint)  fmt="Install davfs2 manually (%s install davfs2), then re-run menu item 3." ;;
+      setup_davfs_conf)  fmt="davfs2 configured: %s (use_locks 0) and %s (mount credentials, 600)." ;;
+      setup_fstab_ok)    fmt="Line added to /etc/fstab (backup: %s). To mount: mount %s" ;;
+      setup_fstab_line)  fmt="Add this line to /etc/fstab (as root):" ;;
+      setup_mount_try)   fmt="Trying to mount %s…" ;;
+      setup_mount_ok)    fmt="Mounted! Cloud files are available at %s" ;;
+      setup_mount_fail)  fmt="Automatic mount failed — run the commands from the blocks above manually." ;;
+      setup_done)        fmt="Mount setup finished." ;;
+      setup_skip)        fmt="Setup skipped. Return any time: re-run the one-liner → item 3 (or install.sh --setup-mount)." ;;
+      setup_need_bin)    fmt="davfast binary not found — install it first (menu item 1)." ;;
+      setup_next_head)   fmt="Useful commands:" ;;
+      sum_setup_hint)    fmt="You can set up mounting later: re-run the one-liner and pick 'Set up cloud mounting' (or install.sh --setup-mount)." ;;
       uninst_found)      fmt="Found: %s" ;;
       uninst_confirm)    fmt="Delete the listed files?" ;;
       uninst_removed)    fmt="Removed: %s" ;;
@@ -271,6 +349,28 @@ ask() {
   printf '%s' "$__prompt"
   read -r __a < /dev/tty || __a=""
   printf -v "$__var" '%s' "${__a:-$__def}"
+}
+
+# ask_hidden <var> <prompt> — secret input, echo suppressed (tokens/passwords)
+ask_hidden() {
+  local __var="$1" __prompt="$2" __a=""
+  __prompt="${__prompt%$'\n'}"
+  if no_tty; then mark_noninteractive; printf -v "$__var" '%s' ""; return 0; fi
+  printf '%s' "$__prompt"
+  read -rs __a < /dev/tty || __a=""
+  printf '\n'
+  printf -v "$__var" '%s' "$__a"
+}
+
+# wait_port <host> <port> — poll for up to ~10 s
+wait_port() {
+  local i
+  # shellcheck disable=SC2034  # loop counter is intentionally unused
+  for i in $(seq 1 20); do
+    if (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; then return 0; fi
+    sleep 0.5
+  done
+  return 1
 }
 
 # ------------------------------------------------------------------ system --
@@ -732,6 +832,230 @@ EOS
   hr
 }
 
+# ----------------------------------------------------------- mount setup --
+resolve_davfast_bin() {
+  command -v davfast 2>/dev/null && return 0
+  local c
+  for c in /usr/local/bin/davfast "$HOME/.local/bin/davfast" /usr/bin/davfast; do
+    if [[ -x "$c" ]]; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+
+setup_mount_flow() {
+  local BIN
+  BIN="$(resolve_davfast_bin || true)"
+  if [[ -z "$BIN" ]]; then
+    warn "$(t setup_need_bin)"
+    return 1
+  fi
+
+  hr
+  info "$(t setup_title)"
+  hr
+
+  # -- backend choice with explanations -------------------------------------
+  info "$(t setup_backend_head)"
+  dim "$(t setup_b_webdav)"
+  dim "$(t setup_b_webdav_d)"
+  dim "$(t setup_b_mailru)"
+  dim "$(t setup_b_mailru_d)"
+  dim "$(t setup_b_skip)"
+  local a backend="" url="" user="" pass=""
+  ask a "$(t menu_prompt "1")" "1"
+  case "$a" in
+    1) backend="webdav" ;;
+    2) backend="mailru" ;;
+    *) dim "$(t setup_skip)"; return 0 ;;
+  esac
+
+  # -- credentials -----------------------------------------------------------
+  if [[ "$backend" == "webdav" ]]; then
+    ask url "$(t setup_url_q "https://webdav.cloud.mail.ru/")" "https://webdav.cloud.mail.ru/"
+    [[ "$url" == http://* || "$url" == https://* ]] || { err "$(t setup_url_bad)"; return 1; }
+  fi
+  ask user "$(t setup_login_q)" ""
+  ask_hidden pass "$(t setup_token_q)"
+  if [[ -z "$user" || -z "$pass" ]]; then
+    warn "$(t setup_token_empty)"
+    return 1
+  fi
+
+  # -- mount point -----------------------------------------------------------
+  local mp
+  ask mp "$(t setup_mp_q "$HOME/cloud")" "$HOME/cloud"
+  mp="${mp/#\~/$HOME}"; mp="${mp%/}"
+  if [[ -z "$mp" ]]; then mp="$HOME/cloud"; fi
+  if [[ ! -d "$mp" ]]; then
+    if mkdir -p "$mp" 2>/dev/null; then
+      ok "$(t setup_mp_created "$mp")"
+    else
+      warn "$(t setup_mp_fail "$mp" "$mp")"
+    fi
+  fi
+
+  # -- env file with credentials (0600) --------------------------------------
+  local envdir="$HOME/.config/davfast"
+  local envfile="$envdir/davfast.env"
+  mkdir -p "$envdir"
+  chmod 700 "$envdir" 2>/dev/null || true
+  {
+    printf '# davfast mount configuration (created by install.sh on %s)\n' "$(date +%Y-%m-%d)"
+    printf 'DAVFAST_BACKEND="%s"\n' "$backend"
+    printf 'DAVFAST_LISTEN="127.0.0.1:8080"\n'
+    if [[ "$backend" == "webdav" ]]; then
+      printf 'DAVFAST_URL="%s"\n' "$url"
+      printf 'DAVFAST_USER="%s"\n' "$user"
+      printf 'DAVFAST_PASS="%s"\n' "$pass"
+    else
+      printf 'MAILRU_LOGIN="%s"\n' "$user"
+      printf 'MAILRU_PASSWORD="%s"\n' "$pass"
+    fi
+    printf 'DAVFAST_MOUNT="%s"\n' "$mp"
+  } > "$envfile"
+  chmod 600 "$envfile"
+  ok "$(t setup_env_written "$envfile")"
+
+  # -- systemd user unit for the bridge --------------------------------------
+  local unitdir="$HOME/.config/systemd/user"
+  local unit="$unitdir/davfast-serve.service"
+  mkdir -p "$unitdir"
+  local serve_cmd
+  if [[ "$backend" == "webdav" ]]; then
+    # shellcheck disable=SC2016  # ${DAVFAST_URL} must stay literal for systemd
+    serve_cmd="$BIN serve --backend webdav --url \${DAVFAST_URL} --listen \${DAVFAST_LISTEN}"
+  else
+    # shellcheck disable=SC2016
+    serve_cmd="$BIN serve --backend mailru --listen \${DAVFAST_LISTEN}"
+  fi
+  {
+    printf '[Unit]\nDescription=davfast WebDAV bridge (%s backend)\nAfter=network-online.target\nWants=network-online.target\n\n' "$backend"
+    printf '[Service]\nEnvironmentFile=%s\nExecStart=%s\nRestart=on-failure\nRestartSec=3\n\n' "$envfile" "$serve_cmd"
+    printf '[Install]\nWantedBy=default.target\n'
+  } > "$unit"
+  info "$(t setup_unit_written "$unit")"
+
+  local started=0
+  if systemctl --user daemon-reload >/dev/null 2>&1 \
+     && systemctl --user enable davfast-serve.service >/dev/null 2>&1 \
+     && systemctl --user restart davfast-serve.service >/dev/null 2>&1; then
+    ok "$(t setup_unit_ok)"
+    started=1
+  else
+    local log="$HOME/.local/state/davfast-serve.log"
+    mkdir -p "$(dirname "$log")"
+    (
+      set -a
+      # shellcheck disable=SC1090
+      . "$envfile"
+      set +a
+      if [[ "$backend" == "webdav" ]]; then
+        exec "$BIN" serve --backend webdav --url "$url" --listen 127.0.0.1:8080
+      else
+        exec "$BIN" serve --backend mailru --listen 127.0.0.1:8080
+      fi
+    ) >"$log" 2>&1 < /dev/null &
+    disown 2>/dev/null || true
+    warn "$(t setup_unit_fail "$log")"
+    local man_cmd="$BIN serve --backend $backend"
+    if [[ "$backend" == "webdav" ]]; then man_cmd+=" --url $url"; fi
+    man_cmd+=" --listen 127.0.0.1:8080"
+    dim "$(t setup_serve_cmd "$man_cmd")"
+    started=1
+  fi
+  # started is only a marker; both paths continue to the port/mount checks below
+  # shellcheck disable=SC2034
+  (( started )) || true
+
+  # -- wait for the bridge -----------------------------------------------------
+  if ! wait_port 127.0.0.1 8080; then
+    warn "$(t setup_port_timeout "127.0.0.1:8080")"
+    return 1
+  fi
+
+  # -- davfs2 -------------------------------------------------------------------
+  local davfs_ok=0
+  if command -v mount.davfs >/dev/null 2>&1; then
+    davfs_ok=1
+  else
+    warn "$(t setup_davfs_missing)"
+    if [[ -n "$PKG" ]] && confirm "$(t setup_davfs_offer "$PKG")" n; then
+      if pkg_install "davfs2" && command -v mount.davfs >/dev/null 2>&1; then
+        davfs_ok=1
+        ok "$(t done_ok)"
+      fi
+    fi
+    if (( ! davfs_ok )); then
+      local hint="apt/dnf/pacman"
+      [[ -n "$PKG" ]] && hint="$PKG"
+      dim "$(t setup_davfs_hint "$hint")"
+    fi
+  fi
+
+  mkdir -p "$HOME/.davfs2"
+  chmod 700 "$HOME/.davfs2" 2>/dev/null || true
+  if ! grep -qs '^use_locks' "$HOME/.davfs2/davfs2.conf" 2>/dev/null; then
+    printf 'use_locks 0\n' >> "$HOME/.davfs2/davfs2.conf"
+  fi
+  if ! grep -qs '127.0.0.1:8080' "$HOME/.davfs2/secrets" 2>/dev/null; then
+    printf 'http://127.0.0.1:8080/ davfast davfast\n' >> "$HOME/.davfs2/secrets"
+  fi
+  chmod 600 "$HOME/.davfs2/davfs2.conf" "$HOME/.davfs2/secrets" 2>/dev/null || true
+  ok "$(t setup_davfs_conf "$HOME/.davfs2/davfs2.conf" "$HOME/.davfs2/secrets")"
+
+  # -- fstab (needs root; skipped silently to manual hints otherwise) -----------
+  local fstab_ok=0
+  local fline
+  # shellcheck disable=SC2155
+  fline="http://127.0.0.1:8080/ $mp davfs user,noauto,uid=$(id -u),gid=$(id -g) 0 0"
+  if [[ $EUID == 0 ]] || { [[ "$SUDO" != "none" ]] && sudo -n true 2>/dev/null; }; then
+    if $SUDO grep -Fqs " $mp " /etc/fstab 2>/dev/null; then
+      fstab_ok=1
+    elif $SUDO cp /etc/fstab /etc/fstab.davfast.bak 2>/dev/null \
+      && printf '%s\n' "$fline" | $SUDO tee -a /etc/fstab >/dev/null 2>&1; then
+      ok "$(t setup_fstab_ok "/etc/fstab.davfast.bak" "$mp")"
+      fstab_ok=1
+    fi
+  fi
+  if (( ! fstab_ok )); then
+    dim "$(t setup_fstab_line)"
+    dim "  $fline"
+  fi
+
+  # -- try to mount ---------------------------------------------------------------
+  local mounted=0
+  if (( davfs_ok )); then
+    info "$(t setup_mount_try "$mp")"
+    if (( fstab_ok )); then
+      mount "$mp" 2>/dev/null || true
+    elif [[ $EUID == 0 ]]; then
+      mount -t davfs http://127.0.0.1:8080/ "$mp" 2>/dev/null || true
+    elif [[ "$SUDO" != "none" ]] && sudo -n true 2>/dev/null; then
+      $SUDO mount -t davfs http://127.0.0.1:8080/ "$mp" 2>/dev/null || true
+    fi
+    if grep -qs " $mp " /proc/mounts 2>/dev/null; then mounted=1; fi
+  fi
+
+  hr
+  if (( mounted )); then
+    ok "$(t setup_mount_ok "$mp")"
+    # shellcheck disable=SC2012  # display listing for the user
+    ls -A "$mp" 2>/dev/null | head -n 5 || true
+  else
+    warn "$(t setup_mount_fail)"
+  fi
+  info "$(t setup_next_head)"
+  dim "  systemctl --user status davfast-serve    # $( [[ "$LANG_SEL" == "ru" ]] && echo 'статус моста' || echo 'bridge status' )"
+  if [[ "$LANG_SEL" == "ru" ]]; then
+    dim "  mount $mp   # смонтировать (после перезагрузки — то же)"
+    dim "  df -h $mp   # проверить"
+  else
+    dim "  mount $mp   # mount (same after reboot)"
+    dim "  df -h $mp   # verify"
+  fi
+  ok "$(t setup_done)"
+}
+
 install_flow() {
   if ! run_checks; then
     err "$(t chk_fail_exit)"
@@ -745,6 +1069,13 @@ install_flow() {
   build_repo || return 1
   install_binary || return 1
   print_summary
+  if (( ASSUME_YES )); then
+    dim "$(t sum_setup_hint)"
+  elif confirm "$(t setup_offer)" y; then
+    setup_mount_flow || true
+  else
+    dim "$(t setup_skip)"
+  fi
 }
 
 # --------------------------------------------------------------- uninstall --
@@ -790,6 +1121,7 @@ menu() {
     info "$(t menu_title)"
     dim "$(t menu_install)"
     dim "$(t menu_dirs)"
+    dim "$(t menu_setup)"
     dim "$(t menu_check)"
     dim "$(t menu_uninstall)"
     dim "$(t menu_exit)"
@@ -797,8 +1129,9 @@ menu() {
     case "$a" in
       1) CHOOSE_DIRS=0; if install_flow; then return 0; else echo; fi ;;
       2) CHOOSE_DIRS=1; if install_flow; then return 0; else echo; fi ;;
-      3) run_checks || true; echo; continue ;;
-      4) uninstall_flow; echo; continue ;;
+      3) setup_mount_flow || true; echo; continue ;;
+      4) run_checks || true; echo; continue ;;
+      5) uninstall_flow; echo; continue ;;
       0) return 0 ;;
       *) warn "$(t menu_bad)"; continue ;;
     esac
@@ -812,6 +1145,8 @@ davfast installer — https://github.com/teliy/davfast
 Usage: install.sh [options]
 
   -y, --yes, --all   non-interactive: answer yes to everything, use defaults
+      --setup-mount  configure mounting only (backend, credentials, mount point,
+                     bridge service, davfs2) — davfast must be installed already
       --check-only   run system checks and exit
       --uninstall    remove davfast binary and (optionally) sources
       --bin-dir DIR  install binary to DIR (default: /usr/local/bin, or ~/.local/bin without sudo)
@@ -839,6 +1174,7 @@ parse_args() {
       -y|--yes|--all) ASSUME_YES=1 ;;
       --check-only)   CHECK_ONLY=1 ;;
       --uninstall)    UNINSTALL=1 ;;
+      --setup-mount)  SETUP_MOUNT=1 ;;
       --bin-dir)      BIN_DIR="${2:?--bin-dir needs a value}"; shift ;;
       --src-dir)      SRC_DIR="${2:?--src-dir needs a value}"; shift ;;
       --repo)         REPO_URL="${2:?--repo needs a value}"; shift ;;
@@ -881,6 +1217,12 @@ main() {
     run_checks || rc=1
     if (( rc == 0 )); then ok "$(t done_ok)"; fi
     exit "$rc"
+  fi
+
+  if (( SETUP_MOUNT )); then
+    print_banner
+    setup_mount_flow
+    return 0
   fi
 
   if no_tty; then mark_noninteractive; fi
