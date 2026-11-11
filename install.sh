@@ -530,6 +530,7 @@ run_checks() {  # prints report; returns non-zero only on hard failure (network)
     warn "  $(t chk_cc_fail)"
   fi
 
+  rustver || true   # populate RUST_V in the current shell (rust_state runs in a subshell)
   st="$(rust_state)"
   case "$st" in
     ok)      ok   "  $(t chk_rust_ok "$RUST_V" "1.$MIN_RUST_MINOR")" ;;
