@@ -215,6 +215,16 @@ async fn passthrough(
         Some(b) => b.clone(),
         None => return text_response(StatusCode::INTERNAL_SERVER_ERROR, "no upstream"),
     };
+
+    // Answer capability discovery locally: davfs2 (and other WebDAV clients)
+    // require the `DAV:` header on the OPTIONS response, and proxying it to
+    // the upstream would strip it (only a few response headers survive the
+    // hop below). The bridge — not the upstream — is the server the client
+    // talks to, so advertise the bridge's own method set.
+    if method == Method::OPTIONS {
+        return empty_response(StatusCode::OK);
+    }
+
     let enc = encode_dav_path(&normalize_remote(&full));
     let mut url = format!("{}{}", base.trim_end_matches('/'), enc);
     if enc == "/" {
@@ -249,12 +259,15 @@ async fn passthrough(
         Ok(r) => {
             let status = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             let mut b = Response::builder().status(status);
+            let dav_hdr = header::HeaderName::from_static("dav");
             for k in [
                 header::CONTENT_TYPE,
                 header::CONTENT_LENGTH,
                 header::ETAG,
                 header::LAST_MODIFIED,
                 header::LOCATION,
+                dav_hdr,
+                header::ALLOW,
             ] {
                 if let Some(v) = r.headers().get(&k) {
                     b = b.header(k, v);
