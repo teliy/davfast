@@ -28,6 +28,7 @@ USE_COLOR=1
 MIN_RUST_MAJOR=1
 MIN_RUST_MINOR=75
 NEED_MB=2000                      # free disk space needed for the build, MB
+RUST_V=""                         # detected rustc version (set by rustver)
 
 PATH="$HOME/.cargo/bin:$PATH"
 export PATH
@@ -230,7 +231,12 @@ t() {  # t <key> [args...] -> translated, formatted message (adds trailing \n)
 }
 
 # ------------------------------------------------------------------ prompts --
-no_tty() { [[ ! -r /dev/tty ]]; }
+no_tty() {
+  # /dev/tty may exist but fail to open (ENXIO) when there is no controlling terminal
+  if [[ ! -r /dev/tty ]]; then return 0; fi
+  if ! { : < /dev/tty; } 2>/dev/null; then return 0; fi
+  return 1
+}
 
 mark_noninteractive() {
   if (( ! ASSUME_YES )); then
